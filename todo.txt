@@ -3,9 +3,3 @@ repgen -> statements, glenn, 'vendor payments with dates'
 send yesterday's paid statements at 8am, with which date the money will arrive to the customer
 CV sales: highlight HGV sales
 get all sales from last 6 months and compare to get new entries
-
-UNPAID
-repgen -> statements, glenn, 'vendor payout status NEW w/ addnl notes'
-use the master spreadsheet but cut out the BIDS Middle man by calling SQL direct from VBA
-display each sale in its own sheet, one update button that does it all
-
