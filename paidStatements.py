@@ -105,7 +105,38 @@ def getNewEntries():
         logErrorAndExit(e)
 
     return newRows - oldRows
+
+
+def createAttachment(rows, headers):
+    """
+    Creates the CSV attachment that will be send as an email attachment
+
+    Args:
+        rows (list of list): list of yesterday's paid statements
+        headers (list of str): column headers for the data
+
+    Returns:
+        BytesIO: CSV content stored in memory
+    """
+    # Initialise bytes object to be sent as email attachment
+    content = io.BytesIO()
+    textWrapper = io.TextIOWrapper(content, encoding='utf-8', newline='')
+    writer = csv.writer(textWrapper)
+
+    # CREATE SUBTOTAL ROW
     
+    # Write to file
+    writer.writerow(headers)
+    writer.writerows(rows)
+
+    # Flush and rewind to the beginning
+    textWrapper.flush()
+    textWrapper.detach()
+    content.seek(0)
+
+    # Return CSV content
+    return content
+
 
 def sendEmail(content):
     """
@@ -117,7 +148,7 @@ def sendEmail(content):
     Raises:
         Logs and exits the script if email sending fails.
     """
-    # SMTP configuration (gets credentials from .env file so as not to hard code them in the script)
+    # SMTP configuration
     smtpServer = os.getenv('SMTP_SERVER')
     smtpPort = int(os.getenv('SMTP_PORT'))
     username = os.getenv('SMTP_USERNAME')
@@ -125,12 +156,12 @@ def sendEmail(content):
 
     # Create the email message
     msg = EmailMessage()
-    msg['Subject'] = f'Yesterday\'s numbers (you choose the subject)'
+    msg['Subject'] = f'Yesterday\'s paid statements'
     msg['From'] = username
     msg['To'] = os.getenv('SMTP_RECIPIENT')
 
     # Set message content
-    msg.set_content('test')
+    msg.set_content('Yesterday\'s paid statements')
 
     # Attach CSV
     msg.add_attachment(
@@ -147,10 +178,21 @@ def sendEmail(content):
             server.login(username, password)
             server.send_message(msg)
 
-            with open("logs.txt", "a") as logs:
-                logs.write(f'Successful run: {datetime.now()}\n')
-
     except Exception as e: logErrorAndExit(e)
+
+
+def renameFiles():
+    """
+    Removes old data and replaces it with updated data
+    """
+    try:
+        if os.path.exists('old.csv'):
+            os.remove('old.csv')
+
+        if os.path.exists('new.csv'):
+            os.rename('new.csv', 'old.csv')
+    except Exception as e:
+        logErrorAndExit(e)
 
 
 def logErrorAndExit(e):
@@ -166,131 +208,34 @@ def logErrorAndExit(e):
     sys.exit(1)
 
 
-load_dotenv()
-query = '''
-SELECT 
-	tblsaledetails.SaleNo					    AS [Sale Number], 
-    CONVERT(
-		nvarchar(20), 
-		tblsaledetails.actual_date, 
-		106
-	)										    AS [Sale Date], 
-    tblstatement.VendorNumber AS [Vendor Ref], 
-    CASE 
-		WHEN LTRIM(RTRIM(isnull(tblclient_database.company_name, ''))) = '' THEN
-			LTRIM(RTRIM(tblclient_database.title + ' ' + tblclient_database.firstname + ' ' + tblclient_database.surname)) 
-		ELSE
-			LTRIM(RTRIM(isnull(tblclient_database.company_name, ''))) 
-	END										    AS [Account Name], 
-    tblclient_database.account_name			    AS [Payee], 
-    tblstatement.Statementnumber				AS [Statement No.], 
-    CONVERT(
-		nvarchar(20), 
-		PARSE(tblstatement.statementdate AS date USING 'en-GB'), 
-		106
-    )										    AS [Statement Date], 
-    FORMAT(tblstatement.Total, 'N2')			AS [Amount], 
-    FORMAT(tblstatement.LeftToPay, 'N2')		AS [Left to Pay], 
-    Replace(
-		Replace(
-			tblstatement.statementnotes, 
-			CHAR(10), 
-			''
-		), 
-		CHAR(13), 
-		' '
-    )											AS [Statement Notes], 
-    FORMAT(
-		lotDetail.goods + lotDetail.goodsVAT - (
-			lotDetail.commission_VATseparated + lotDetail.commissionVAT_VATseparated + tblstatement.vendorcharges + tblstatement.vatvendorcharges
-		), 
-		'N2'
-    )											AS [Total], 
-	CONVERT(
-		nvarchar(20), 
-		payments.paydate
-    )											AS [Payment Date], 
-    FORMAT(payments.otherTotal, 'N2')			AS [Bank Transfer] 
+def main():
+    """
+    Executes the end-to-end data processing pipeline:
+        - Loads environment variables and SQL query.
+        - Retrieves data from the past 6 months.
+        - Saves results to CSV and identifies new entries.
+        - Generates an email attachment and sends the email.
+        - Renames output files and logs the run status.
+    """    
+    # Load credentials and query
+    load_dotenv()
+    with open('query.sql', 'r') as file:
+        query = file.read()
 
-FROM 
-    tblstatement 
-    LEFT JOIN tblsaledetails ON tblsaledetails.SaleID = tblstatement.SaleID 
-    LEFT JOIN tblclient_database ON tblclient_database.client_ref = tblstatement.VendorNumber 
-    LEFT JOIN (
-		SELECT 
-		    statementnumber, 
-		    paydate, 
-		    SUM(
-				CASE WHEN type = 'cheque' THEN amount ELSE 0 END
-			) AS chqTotal, 
-		    SUM(
-				CASE WHEN type = 'contra' OR type = 'xko' THEN amount ELSE 0 END
-			) AS contraTotal, 
-			SUM(
-				CASE WHEN type != 'cheque' AND type != 'contra' AND type != 'xko' THEN amount ELSE 0 END
-			) AS otherTotal 
+    # Main logical flow
+    dateString = get6MonthsAgo()
+    rows, headers = getData(query, dateString)
+    dumpToCSV(rows, headers)
+    newEntries = getNewEntries()
+    content = createAttachment(newEntries, headers)
+    sendEmail(content)
+    renameFiles()
 
-		FROM 
-			tblstatement_payments 
+    # Log success
+    with open("logs.txt", "a") as logs:
+        logs.write(f'Successful run: {datetime.now()}\n')
 
-		GROUP BY 
-			statementnumber, 
-			paydate
 
-	) AS payments ON payments.Statementnumber = tblstatement.Statementnumber 
-	LEFT JOIN (
-		SELECT 
-			tblstatement_lines.statementnumber, 
-			SUM(tbllot_details.hammer_excVAT) AS goods, 
-			SUM(tbllot_details.hammer_vat)    AS goodsVAT, 
-			SUM(
-				CASE WHEN tbllot_details.hammer_vat != 0 THEN tbllot_details.hammer_excVAT END
-			)								  AS hammerLiable, 
-			SUM(
-				CASE WHEN tbllot_details.hammer_vat = 0 THEN tbllot_details.hammer_excVAT END
-			)								  AS hammerNotLiable, 
-			SUM(
-			   CASE WHEN tblsaledetails_vatrates.directChVATshownSeperately != 0 THEN commission_excVAT ELSE 0 END
-		    )								  AS commission_VATseparated, 
-			SUM(
-			   CASE WHEN tblsaledetails_vatrates.directChVATshownSeperately != 0 THEN commission_VAT ELSE 0 END
-		    )								  AS commissionVAT_VATseparated, 
-			SUM(
-				CASE WHEN tblsaledetails_vatrates.directChVATshownSeperately = 0 THEN commission_excVAT ELSE 0 END
-			)								  AS commission_VATnotSeparated, 
-			SUM(
-				CASE WHEN tblsaledetails_vatrates.directChVATshownSeperately = 0 THEN commission_VAT ELSE 0 END
-			)								  AS commissionVAT_VATnotSeparated
-
-		FROM 
-			tblstatement_lines 
-			LEFT JOIN tblstatement ON tblstatement.Statementnumber = tblstatement_lines.statementnumber 
-			LEFT JOIN tbllot_details ON tbllot_details.SaleID = tblstatement.saleid 
-				AND tbllot_details.lotno = tblstatement_lines.lotno 
-				AND tblstatement_lines.hammer > 0.005 
-			LEFT JOIN tblsaledetails_vatrates ON tblsaledetails_vatrates.vatid = tbllot_details.VAT_rate 
-		
-		GROUP BY 
-			tblstatement_lines.statementnumber
-	) AS lotDetail ON lotDetail.statementnumber = tblstatement.Statementnumber 
-
-WHERE 
-	tblstatement.Total > 0 
-	AND (
-		tblsaledetails.actual_date <= GETDATE() 
-		OR (
-			tblsaledetails.SaleNo = 'TO010100' 
-			OR tblsaledetails.SaleNo = 'PM281299'
-		)	
-	) 
-	AND ISNULL(PARSE(tblstatement.statementdate AS date USING 'en-GB'), '') > ?
-	AND ISNULL(payments.otherTotal, 0) != 0
-  
-ORDER BY 
-	[Statement Date] DESC, 
-    [Vendor Ref] ASC;
-'''
-dateString = get6MonthsAgo()
-rows, columns = getData(query, dateString)
-dumpToCSV(rows, columns)
-print(getNewEntries())
+# Run program
+if __name__ == '__main__':
+    main()

@@ -1,5 +1,0 @@
-PAID
-repgen -> statements, glenn, 'vendor payments with dates'
-send yesterday's paid statements at 8am, with which date the money will arrive to the customer
-CV sales: highlight HGV sales
-get all sales from last 6 months and compare to get new entries
