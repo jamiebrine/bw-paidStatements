@@ -89,22 +89,124 @@ def getNewEntries():
     Compares 'old.csv' and 'new.csv' to find new entries.
 
     Reads both CSV files and determines which rows are new by subtracting
-    the set of old rows from the set of new rows.
+    the set of old rows (as tuples) from the new rows (as tuples),
+    but returns the new entries as mutable lists.
 
     Returns:
-        newEntries (list of list): A list of rows of data
+        newEntries (list of list): A list of new rows as lists.
     """
     try:
-        # Find new data by comparing new csv to old one
         with open('old.csv', newline='', encoding='utf-8') as csvfile:
             oldRows = set(tuple(row) for row in csv.reader(csvfile))
         with open('new.csv', newline='', encoding='utf-8') as csvfile:
-            newRows = set(tuple(row) for row in csv.reader(csvfile))
-    
+            newReader = csv.reader(csvfile)
+            newRows = [row for row in newReader]
+        
+        # Compare using tuple versions
+        newEntries = [row for row in newRows if tuple(row) not in oldRows]
+
+        # Convert numerical values to number format
+        for entry in newEntries:
+            for i in [7, 8, 10, 12]:
+                entry[i] = float(entry[i].replace(',',''))
+
     except Exception as e:
         logErrorAndExit(e)
 
-    return newRows - oldRows
+    return newEntries
+
+
+def splitBySaleType(rows):
+    """
+    Creates a dictionary of sale types and their new entries
+
+    Args:
+        rows (list of list): List of each new entry
+
+    Returns:
+        dict: Created dictionary
+    """    
+    dict = {
+    }
+
+    for row in rows:
+
+        # Gets first 2 letters of sale number to determine type
+        saleType = row[0][:2]
+
+        # If a sale of this type is already in the dictionary, add to its list 
+        if saleType in dict:
+            dict[saleType].append(row)
+        # Else, create a new entry in the dictionary
+        else:
+            dict[saleType] = [row]
+    
+    return dict
+
+
+def addSubtotals(rowDict):
+
+    for saleType in rowDict:
+
+        # Get data for current sale type, and how many rows of data it has
+        rows = rowDict[saleType]
+        numRows = len(rows)
+
+        # Track where subtotal rows have been added, and the most recent sale number
+        subtotalRows = []
+        currentSaleNo = rows[0][0]
+
+        # Loop through each row of data, adding a subtotal row after each sale
+        i = 0
+        j = 0
+        
+        while i < numRows:
+
+            # Tracks index of actual data rows, ignoring subtotal and buffer rows
+            j =  i + 2 * len(subtotalRows)
+            if rows[j][0] != currentSaleNo:
+
+                # Subtotal from first row if there are currently none, or previous subtotal row otherwise
+                subtotalRow = ['Subtotal:','','','','','','','7','8','','10','','12']
+                if subtotalRows == []:
+                    kMin = 0
+                else:
+                    kMin = subtotalRows[-1] + 1
+                
+                # Calculate subtotals for numerical values, adding them in the correct position
+                subtotalRow[7] = sum(rows[k][7] for k in range(kMin, j))
+                subtotalRow[8] = sum(rows[k][8] for k in range(kMin, j))
+                subtotalRow[10] = sum(rows[k][10] for k in range(kMin, j))
+                subtotalRow[12] = sum(rows[k][12] for k in range(kMin, j))
+
+                # Insert subtotal and buffer row and update subtotal tracker
+                rows.insert(j, subtotalRow)
+                rows.insert(j + 1, ['-'] * 13)
+                subtotalRows.append(j + 1)
+                currentSaleNo = rows[j + 2][0]
+
+            i += 1
+
+        # Add final subtotal row
+        subtotalRow = ['Subtotal:','','','','','','','7','8','','10','','12']
+        if subtotalRows == []:
+            kMin = 0
+        else:
+            kMin = subtotalRows[-1] + 1
+        kMax = numRows + 2 * len(subtotalRows)
+
+        subtotalRow[7] = sum(rows[k][7] for k in range(kMin, kMax))
+        subtotalRow[8] = sum(rows[k][8] for k in range(kMin, kMax))
+        subtotalRow[10] = sum(rows[k][10] for k in range(kMin, kMax))
+        subtotalRow[12] = sum(rows[k][12] for k in range(kMin, kMax))
+        rows.append(subtotalRow)
+
+        # Update row dictionary with added rows 
+        rowDict[saleType] = rows
+        for row in rows:
+            print(row)
+        print('\n')
+        
 
 
 def createAttachment(rows, headers):
@@ -123,8 +225,7 @@ def createAttachment(rows, headers):
     textWrapper = io.TextIOWrapper(content, encoding='utf-8', newline='')
     writer = csv.writer(textWrapper)
 
-    # CREATE SUBTOTAL ROW
-    
+
     # Write to file
     writer.writerow(headers)
     writer.writerows(rows)
@@ -216,20 +317,25 @@ def main():
         - Saves results to CSV and identifies new entries.
         - Generates an email attachment and sends the email.
         - Renames output files and logs the run status.
-    """    
+    """
     # Load credentials and query
     load_dotenv()
     with open('query.sql', 'r') as file:
         query = file.read()
 
     # Main logical flow
-    dateString = get6MonthsAgo()
-    rows, headers = getData(query, dateString)
-    dumpToCSV(rows, headers)
+    # dateString = get6MonthsAgo()
+    # rows, headers = getData(query, dateString)
+    # dumpToCSV(rows, headers)
     newEntries = getNewEntries()
-    content = createAttachment(newEntries, headers)
-    sendEmail(content)
-    renameFiles()
+    print('got new ones')
+
+    rowDict = splitBySaleType(newEntries)
+    rowDictWithSubtotals = addSubtotals(rowDict)
+
+    # content = createAttachment(newEntries, headers)
+    # sendEmail(content)
+    # renameFiles()
 
     # Log success
     with open("logs.txt", "a") as logs:

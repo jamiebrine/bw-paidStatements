@@ -1,6 +1,6 @@
 SELECT 
     tblsaledetails.SaleNo					    AS [Sale Number], 
-    tblsaledetails.actual_date, 			    AS [Sale Date], 
+    tblsaledetails.actual_date  			    AS [Sale Date], 
     tblstatement.VendorNumber                   AS [Vendor Ref], 
     CASE 
         WHEN LTRIM(RTRIM(isnull(tblclient_database.company_name, ''))) = '' THEN
@@ -112,3 +112,6 @@ WHERE
     AND ISNULL(PARSE(tblstatement.statementdate AS date USING 'en-GB'), '') > ?
     AND ISNULL(payments.otherTotal, 0) != 0
 
+ORDER BY
+    tblsaledetails.actual_date ASC,
+    tblsaledetails.SaleNo ASC;
