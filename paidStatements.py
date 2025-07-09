@@ -145,7 +145,15 @@ def splitBySaleType(rows):
 
 
 def addSubtotals(rowDict):
+    """
+    Subtotals the values for each sale, inserting subtotal rows into the correct positions
 
+    Args:
+        rowDict (dict): Dictionary of (sale type : sale rows) pairs
+
+    Returns:
+        dict: Updated dictionary with subtotal rows added
+    """
     for saleType in rowDict:
 
         # Get data for current sale type, and how many rows of data it has
@@ -203,11 +211,8 @@ def addSubtotals(rowDict):
 
         # Update row dictionary with added rows 
         rowDict[saleType] = rows
-        for row in rows:
-            print(row)
-        print('\n')
+    return rowDict
         
-
 
 def createAttachment(rows, headers):
     """
@@ -324,17 +329,19 @@ def main():
         query = file.read()
 
     # Main logical flow
-    # dateString = get6MonthsAgo()
-    # rows, headers = getData(query, dateString)
-    # dumpToCSV(rows, headers)
+    dateString = get6MonthsAgo()
+    rows, headers = getData(query, dateString)
+    dumpToCSV(rows, headers)
     newEntries = getNewEntries()
     print('got new ones')
 
     rowDict = splitBySaleType(newEntries)
     rowDictWithSubtotals = addSubtotals(rowDict)
 
-    # content = createAttachment(newEntries, headers)
-    # sendEmail(content)
+    for key in rowDictWithSubtotals:
+        content = createAttachment(rowDictWithSubtotals[key], headers)
+        sendEmail(content)
+
     # renameFiles()
 
     # Log success
