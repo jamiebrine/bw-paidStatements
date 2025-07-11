@@ -7,6 +7,17 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import os
 import sys
+from typing import Optional
+import traceback
+
+# TODO - get this fully from Glenn
+recipientsDict = {
+    'CV' : ['jamie.brine@brightwells.com'],
+    'VT' : ['jamie.brine@brightwells.com'],
+    'CC' : ['jamie.brine@brightwells.com'],
+    'PM' : ['jamie.brine@brightwells.com'],
+    'master': ['jamie.brine@brightwells.com']
+}
 
 def get6MonthsAgo():
     """
@@ -42,7 +53,7 @@ def getData(query, dateString):
     pwd = os.getenv("SQL_PWD")
 
     if not all([server, database, uid, pwd]):
-        logErrorAndExit(ValueError("Missing one or more SQL connection environment variables"))
+        raise ValueError("Missing one or more SQL connection environment variables")
 
     # Define connection string
     connStr = (
@@ -54,16 +65,11 @@ def getData(query, dateString):
     )
 
     # Connect to database and execute queries, combining their results
-    try:
-        with pyodbc.connect(connStr) as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(query, dateString)
-                headers = [column[0] for column in cursor.description]
-                rows = cursor.fetchall()
-
-    # Log any errors
-    except Exception as e:
-        logErrorAndExit(e)
+    with pyodbc.connect(connStr) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(query, dateString)
+            headers = [column[0] for column in cursor.description]
+            rows = cursor.fetchall()
 
     return rows, headers
 
@@ -95,23 +101,20 @@ def getNewEntries():
     Returns:
         newEntries (list of list): A list of new rows as lists.
     """
-    try:
-        with open('old.csv', newline='', encoding='utf-8') as csvfile:
-            oldRows = set(tuple(row) for row in csv.reader(csvfile))
-        with open('new.csv', newline='', encoding='utf-8') as csvfile:
-            newReader = csv.reader(csvfile)
-            newRows = [row for row in newReader]
-        
-        # Compare using tuple versions
-        newEntries = [row for row in newRows if tuple(row) not in oldRows]
 
-        # Convert numerical values to number format
-        for entry in newEntries:
-            for i in [7, 8, 10, 12]:
-                entry[i] = float(entry[i].replace(',',''))
+    with open('old.csv', newline='', encoding='utf-8') as csvfile:
+        oldRows = set(tuple(row) for row in csv.reader(csvfile))
+    with open('new.csv', newline='', encoding='utf-8') as csvfile:
+        newReader = csv.reader(csvfile)
+        newRows = [row for row in newReader]
+    
+    # Compare using tuple versions
+    newEntries = [row for row in newRows if tuple(row) not in oldRows]
 
-    except Exception as e:
-        logErrorAndExit(e)
+    # Convert numerical values to number format
+    for entry in newEntries:
+        for i in [7, 8, 10, 12]:
+            entry[i] = float(entry[i].replace(',',''))
 
     return newEntries
 
@@ -244,7 +247,7 @@ def createAttachment(rows, headers):
     return content
 
 
-def sendEmail(content):
+def sendEmail(content, recipients, subject):
     """
     Sends an email with the CSV report attached via SMTP.
 
@@ -262,9 +265,11 @@ def sendEmail(content):
 
     # Create the email message
     msg = EmailMessage()
-    msg['Subject'] = f'Yesterday\'s paid statements'
+    msg['Subject'] = subject
     msg['From'] = username
-    msg['To'] = os.getenv('SMTP_RECIPIENT')
+
+    # Process list of recipients as a comma seperated string for SMTP
+    msg['To'] = ', '.join(recipients)
 
     # Set message content
     msg.set_content('Yesterday\'s paid statements')
@@ -278,40 +283,63 @@ def sendEmail(content):
     )
 
     # Send the email
-    try:
-        with smtplib.SMTP(smtpServer, smtpPort) as server:
-            server.starttls()
-            server.login(username, password)
-            server.send_message(msg)
-
-    except Exception as e: logErrorAndExit(e)
+    with smtplib.SMTP(smtpServer, smtpPort) as server:
+        server.starttls()
+        server.login(username, password)
+        server.send_message(msg)
 
 
 def renameFiles():
     """
     Removes old data and replaces it with updated data
     """
-    try:
-        if os.path.exists('old.csv'):
-            os.remove('old.csv')
+    if os.path.exists('old.csv'):
+        os.remove('old.csv')
 
-        if os.path.exists('new.csv'):
-            os.rename('new.csv', 'old.csv')
-    except Exception as e:
-        logErrorAndExit(e)
+    if os.path.exists('new.csv'):
+        os.rename('new.csv', 'old.csv')
 
 
-def logErrorAndExit(e):
+def logAndExit(exception: Optional[Exception] = None, logFile: str = "logs.txt"):
     """
-    Logs an error message and exits the script.
+    Logs a success or error message to the top of the log file and exits the script.
+
+    If an exception is provided, logs it as an error with a traceback.
+    Otherwise, logs a default success message.
 
     Args:
-        e (Exception): The exception or error message to log.
+        exception (Exception, optional): The exception to log. If provided, logs as an error.
+        logFile (str): Path to the log file. Defaults to 'logs.txt'.
     """
+    exitCode = 1 if exception else 0
 
-    with open("logs.txt", "a") as logs:
-        logs.write(f'{e}\n')
-    sys.exit(1)
+    try:
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        if exception:
+            header = f"[{timestamp}] ERROR:\n"
+            body = traceback.format_exc()
+        else:
+            header = f"[{timestamp}] SUCCESS: Script completed successfully.\n"
+            body = ""
+
+        fullEntry = header + body + ("-" * 80) + "\n"
+
+        oldContent = ""
+        if os.path.exists(logFile):
+            with open(logFile, 'r') as file:
+                oldContent = file.read()
+
+        with open(logFile, 'w') as file:
+            file.write(fullEntry + oldContent)
+
+    # Fallback
+    except Exception as e:
+        print('Failed to log due to error in logging function:')
+        print(e)
+
+    finally:
+        sys.exit(exitCode)
 
 
 def main():
@@ -323,30 +351,46 @@ def main():
         - Generates an email attachment and sends the email.
         - Renames output files and logs the run status.
     """
-    # Load credentials and query
-    load_dotenv()
-    with open('query.sql', 'r') as file:
-        query = file.read()
+    try:
+        # Load credentials and query
+        load_dotenv()
+        with open('query.sql', 'r') as file:
+            query = file.read()
 
-    # Main logical flow
-    dateString = get6MonthsAgo()
-    rows, headers = getData(query, dateString)
-    dumpToCSV(rows, headers)
-    newEntries = getNewEntries()
-    print('got new ones')
+        # Main logical flow
+        dateString = get6MonthsAgo()
+        rows, headers = getData(query, dateString)
+        dumpToCSV(rows, headers)
+        newEntries = getNewEntries()
 
-    rowDict = splitBySaleType(newEntries)
-    rowDictWithSubtotals = addSubtotals(rowDict)
+        rowDict = splitBySaleType(newEntries)
+        rowDictWithSubtotals = addSubtotals(rowDict)
+        masterCSVRows = []
 
-    for key in rowDictWithSubtotals:
-        content = createAttachment(rowDictWithSubtotals[key], headers)
-        sendEmail(content)
+        for key in rowDictWithSubtotals:
+            
+            # Sends an email to the correct department for each sale typ
+            content = createAttachment(rowDictWithSubtotals[key], headers)
+            recipients = recipientsDict[key]
+            subject = f'{key} Payments Raised Yesterday'
+            sendEmail(content, recipients, subject)
 
-    # renameFiles()
+            # Add rows of CSV to master document
+            masterCSVRows += rowDictWithSubtotals[key]
+            masterCSVRows += [['~~~~~~'] * 14]
 
-    # Log success
-    with open("logs.txt", "a") as logs:
-        logs.write(f'Successful run: {datetime.now()}\n')
+        # Send master document
+        content = createAttachment(masterCSVRows, headers)
+        recipients = recipientsDict['master']
+        subject = 'All Payments Raised Yesterday'
+        sendEmail(content, recipients, subject)
+
+        # Delete old data and replace it with updated data
+        renameFiles()
+        logAndExit()
+    
+    except Exception as e:
+        logAndExit(e)
 
 
 # Run program
