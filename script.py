@@ -12,11 +12,11 @@ import traceback
 
 # TODO - get this fully from Glenn
 recipientsDict = {
-    'CV' : ['jamie.brine@brightwells.com'],
-    'VT' : ['jamie.brine@brightwells.com'],
-    'CC' : ['jamie.brine@brightwells.com'],
-    'PM' : ['jamie.brine@brightwells.com'],
-    'master': ['jamie.brine@brightwells.com']
+    'CV' : ['glenn.thomas@brightwells.com'],
+    'VT' : ['glenn.thomas@brightwells.com'],
+    'CC' : ['glenn.thomas@brightwells.com'],
+    'PM' : ['glenn.thomas@brightwells.com'],
+    'master': ['glenn.thomas@brightwells.com']
 }
 
 def get6MonthsAgo():
