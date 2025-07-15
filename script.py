@@ -16,6 +16,12 @@ recipientsDict = {
     'VT' : ['glenn.thomas@brightwells.com'],
     'CC' : ['glenn.thomas@brightwells.com'],
     'PM' : ['glenn.thomas@brightwells.com'],
+    'MC' : ['glenn.thomas@brightwells.com'],
+    'NP' : ['glenn.thomas@brightwells.com'],
+    'WS' : ['glenn.thomas@brightwells.com'],
+    'TO' : ['glenn.thomas@brightwells.com'],
+    'SU' : ['glenn.thomas@brightwells.com'],
+    'PL' : ['glenn.thomas@brightwells.com'],
     'master': ['glenn.thomas@brightwells.com']
 }
 
